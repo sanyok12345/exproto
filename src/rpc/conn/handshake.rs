@@ -1,5 +1,6 @@
 use crate::crypto::block::cbc::CbcCipher;
 use crate::crypto::kdf::middle::derive_middle_key_iv;
+use crate::net::socket::configure_socket;
 use crate::rpc::frame::make_frame;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,7 +17,7 @@ pub async fn handshake(
     proxy_secret: &[u8],
 ) -> Result<(TcpStream, CbcCipher), Box<dyn std::error::Error + Send + Sync>> {
     let mut stream = TcpStream::connect(addr).await?;
-    let _ = stream.set_nodelay(true);
+    configure_socket(&stream);
 
     let local_addr = stream.local_addr()?;
     let srv_ip4 = match addr {

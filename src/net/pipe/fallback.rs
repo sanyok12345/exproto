@@ -1,4 +1,5 @@
 use crate::cli::TlsFallbackConfig;
+use crate::net::socket::configure_socket;
 use rand::Rng;
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
@@ -21,7 +22,7 @@ pub async fn relay_to_fallback(
     };
 
     let mut upstream = upstream;
-    let _ = upstream.set_nodelay(true);
+    configure_socket(&upstream);
 
     if upstream.write_all(already_read).await.is_err() { return; }
 

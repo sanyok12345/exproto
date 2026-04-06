@@ -3,6 +3,7 @@ use crate::crypto::stream::ctr::Aes256Ctr;
 use crate::engine::error::ProtocolError;
 use crate::mtproto::conn::state::ProtoTag;
 use crate::mtproto::dc;
+use crate::net::socket::configure_socket;
 use super::pattern;
 use ctr::cipher::{KeyIvInit, StreamCipher};
 use rand::RngCore as _;
@@ -67,7 +68,7 @@ pub async fn connect_to_dc(
 ) -> Result<(TcpStream, ObfuscatedCipher), ProtocolError> {
     let addr = dc::resolve_dc(dc_id)?;
     let mut stream = tcp_connect_with_bind(addr, bind_addr).await?;
-    let _ = stream.set_nodelay(true);
+    configure_socket(&stream);
 
     let init = generate_init(proto);
 
@@ -90,6 +91,7 @@ pub async fn connect_to_dc(
     let decryptor = Aes256Ctr::new(&dec_key.into(), &dec_iv.into());
 
     stream.write_all(&init_wire).await.map_err(ProtocolError::Io)?;
+    stream.flush().await.map_err(ProtocolError::Io)?;
 
     debug!(dc = dc_id, addr, "DC handshake complete");
 

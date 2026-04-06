@@ -1,4 +1,5 @@
 use crate::cli::{Config, ProxyMode, UpstreamConfig};
+use crate::engine::error::ProtocolError;
 use crate::mtproto::conn::state::TransportMode;
 use crate::mtproto::handshake;
 use crate::mtproto::init;
@@ -6,6 +7,7 @@ use crate::mtproto::dc;
 use crate::net::accept::limit::ConnectionLimiter;
 use crate::net::pipe;
 use crate::net::pipe::middle::MiddleRelayCtx;
+use crate::net::socket::configure_socket;
 use crate::rpc::conn::MiddleProxyConn;
 use crate::tls::hello;
 use crate::tls::record;
@@ -17,6 +19,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tracing::{warn, debug, instrument};
+
+#[allow(clippy::borrowed_box)]
+fn is_probe_noise(e: &Box<dyn std::error::Error + Send + Sync>) -> bool {
+    if e.downcast_ref::<ProtocolError>().is_some_and(|p| p.is_probe_noise()) {
+        return true;
+    }
+    let msg = e.to_string();
+    msg.contains("no matching secret") || msg.contains("connection limit") || msg.contains("init too short")
+}
 
 const TLS_PREFIX: [u8; 3] = [0x16, 0x03, 0x01];
 
@@ -34,7 +45,7 @@ fn resolve_bind_addr<'a>(secret: &'a crate::cli::Secret, config: &'a Config) -> 
 
 #[instrument(skip_all, fields(peer = %peer))]
 pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: Arc<Config>, limiter: Arc<ConnectionLimiter>) {
-    let _ = client.set_nodelay(true);
+    configure_socket(&client);
 
     let hs_timeout = Duration::from_secs(config.timeouts.handshake);
     let mut peek = [0u8; 3];
@@ -48,7 +59,11 @@ pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: 
     };
 
     if let Err(e) = result {
-        warn!("{e}");
+        if is_probe_noise(&e) {
+            debug!("{e}");
+        } else {
+            warn!("{e}");
+        }
     }
 }
 
@@ -107,6 +122,7 @@ async fn handle_faketls(
         client.write_all(&hello.handshake).await?;
         client.write_all(&hello.change_cipher).await?;
         client.write_all(&hello.app_data).await?;
+        client.flush().await?;
     }
 
     let init_data = timeout(hs_timeout, record::read_record(&mut client))
