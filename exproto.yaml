@@ -23,7 +23,7 @@ tls:
 timeouts:
   handshake: 10
   connect: 10
-  idle: 300
+  idle: 1800
 
 logging:
   level: info
