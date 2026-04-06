@@ -18,6 +18,13 @@ impl CbcCipher {
         }
     }
 
+    pub fn into_halves(self) -> (CbcEncryptHalf, CbcDecryptHalf) {
+        (
+            CbcEncryptHalf { cipher: self.enc_cipher, iv: self.enc_iv },
+            CbcDecryptHalf { cipher: self.dec_cipher, iv: self.dec_iv },
+        )
+    }
+
     pub fn encrypt(&mut self, data: &mut [u8]) {
         assert!(data.len() % 16 == 0);
         for chunk in data.chunks_mut(16) {
@@ -40,6 +47,45 @@ impl CbcCipher {
                 *c ^= iv;
             }
             self.dec_iv = ct;
+        }
+    }
+}
+
+pub struct CbcEncryptHalf {
+    cipher: Aes256,
+    iv: [u8; 16],
+}
+
+impl CbcEncryptHalf {
+    pub fn encrypt(&mut self, data: &mut [u8]) {
+        assert!(data.len() % 16 == 0);
+        for chunk in data.chunks_mut(16) {
+            for (c, iv) in chunk.iter_mut().zip(self.iv.iter()) {
+                *c ^= iv;
+            }
+            let block = GenericArray::from_mut_slice(chunk);
+            self.cipher.encrypt_block(block);
+            self.iv.copy_from_slice(chunk);
+        }
+    }
+}
+
+pub struct CbcDecryptHalf {
+    cipher: Aes256,
+    iv: [u8; 16],
+}
+
+impl CbcDecryptHalf {
+    pub fn decrypt(&mut self, data: &mut [u8]) {
+        assert!(data.len() % 16 == 0);
+        for chunk in data.chunks_mut(16) {
+            let ct: [u8; 16] = chunk.try_into().unwrap();
+            let block = GenericArray::from_mut_slice(chunk);
+            self.cipher.decrypt_block(block);
+            for (c, iv) in chunk.iter_mut().zip(self.iv.iter()) {
+                *c ^= iv;
+            }
+            self.iv = ct;
         }
     }
 }
