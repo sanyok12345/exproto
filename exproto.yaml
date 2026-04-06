@@ -20,6 +20,11 @@ tls:
   #     - "cloudflare.com:443"
   #   timeout: 5000
 
+timeouts:
+  handshake: 10
+  connect: 10
+  idle: 300
+
 logging:
   level: info
 
