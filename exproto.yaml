@@ -1,0 +1,51 @@
+# ExProto configuration
+# Usage: exproto run -c exproto.yaml
+
+server:
+  bind: 0.0.0.0               # listen IP
+  port: 443                    # listen port
+  # max-workers: 4             # 0 or omit = all CPU cores
+  # proxy_tag: "aabb...ff"     # global ad-tag from @MTProxyBot
+
+tls:
+  domain: www.google.com       # default SNI for fake-TLS (ee-secrets)
+
+logging:
+  level: info                  # error | warn | info | debug | trace
+
+upstream:                      # default outbound route for all secrets
+  type: direct
+  # bind: 10.0.0.1             # outbound IP (omit = any)
+
+# max-connections: 50000       # global limit (0 or omit = unlimited)
+
+healthcheck:
+  enabled: true
+  interval: 30                 # seconds between DC pings
+  timeout: 5                   # seconds per DC ping
+
+secrets:
+  # minimal — inherits all defaults
+  - name: free
+    secret: "00112233445566778899aabbccddeeff"
+
+  # full — everything overridden
+  - name: premium
+    secret: "aabbccddeeff00112233445566778899"
+    domain: cdn.jsdelivr.net       # per-secret SNI
+    mode: direct                   # direct | middle-proxy
+    max-connections: 5000          # per-secret limit
+    ad-tag: "fedcba9876543210fedcba9876543210"  # per-secret @MTProxyBot tag
+    upstream:
+      type: direct
+      bind: 10.0.0.2              # outbound IP for this secret
+
+  # socks5 upstream example
+  - name: partner
+    secret: "ffeeddccbbaa99887766554433221100"
+    ad-tag: "1234567890abcdef1234567890abcdef"  # partner's own ad-tag
+    upstream:
+      type: socks5
+      address: proxy.partner.com:1080
+      username: exproto
+      password: s3cret
