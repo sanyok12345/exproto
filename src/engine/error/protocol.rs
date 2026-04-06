@@ -15,3 +15,9 @@ pub enum ProtocolError {
     #[error("protocol io: {0}")]
     Io(#[from] std::io::Error),
 }
+
+impl ProtocolError {
+    pub fn is_probe_noise(&self) -> bool {
+        matches!(self, Self::UnknownProtoTag(_) | Self::InvalidDc(_) | Self::InitTooShort(_))
+    }
+}
