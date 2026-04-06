@@ -9,6 +9,7 @@ use crate::net::pipe::middle::MiddleRelayCtx;
 use crate::rpc::conn::MiddleProxyConn;
 use crate::tls::hello;
 use crate::tls::record;
+use crate::tls::record::writer::RecordWriteConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -107,7 +108,11 @@ async fn handle_faketls(
         ProxyMode::Direct => {
             let (upstream, dc_cipher) = handshake::connect_to_dc(parsed.dc_id, parsed.proto, bind_addr).await?;
             debug!(dc = parsed.dc_id, "upstream connected (direct)");
-            pipe::tls::relay(client, upstream, parsed.cipher, dc_cipher, extra).await;
+            let write_cfg = RecordWriteConfig {
+                max_record_size: config.tls.stream.max_record_size,
+                record_jitter: config.tls.stream.record_jitter,
+            };
+            pipe::tls::relay(client, upstream, parsed.cipher, dc_cipher, extra, write_cfg).await;
         }
         ProxyMode::MiddleProxy => {
             let tg_cfg = dc::fetch_telegram_config().await

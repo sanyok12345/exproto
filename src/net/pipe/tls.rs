@@ -1,5 +1,6 @@
 use crate::crypto::stream::cipher::ObfuscatedCipher;
-use crate::tls::record::{read_record, write_record};
+use crate::tls::record::writer::RecordWriteConfig;
+use crate::tls::record::{read_record, write_record_with};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -13,6 +14,7 @@ pub async fn relay(
     mut client_cipher: ObfuscatedCipher,
     mut dc_cipher: ObfuscatedCipher,
     initial_extra: Option<Vec<u8>>,
+    write_cfg: RecordWriteConfig,
 ) {
     let (mut cr, mut cw) = client.into_split();
     let (mut ur, mut uw) = upstream.into_split();
@@ -51,7 +53,7 @@ pub async fn relay(
         while let Ok(n @ 1..) = ur.read(&mut buf).await {
             dc_dec.apply(&mut buf[..n]);
             client_enc.apply(&mut buf[..n]);
-            if write_record(&mut cw, &buf[..n]).await.is_err() { break; }
+            if write_record_with(&mut cw, &buf[..n], &write_cfg).await.is_err() { break; }
             total += n as u64;
             trace!(bytes = n, total, "relay: DC -> client[tls]");
         }
