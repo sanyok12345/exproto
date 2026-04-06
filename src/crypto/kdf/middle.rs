@@ -2,6 +2,7 @@ use md5::Md5;
 use sha1::Sha1;
 use sha2::Digest;
 
+#[allow(clippy::too_many_arguments)]
 pub fn derive_middle_key_iv(
     nonce_srv: &[u8; 16],
     nonce_clt: &[u8; 16],

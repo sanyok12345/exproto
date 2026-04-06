@@ -5,6 +5,7 @@ use crate::mtproto::init;
 use crate::mtproto::dc;
 use crate::net::accept::limit::ConnectionLimiter;
 use crate::net::pipe;
+use crate::net::pipe::middle::MiddleRelayCtx;
 use crate::rpc::conn::MiddleProxyConn;
 use crate::tls::hello;
 use crate::tls::record;
@@ -106,12 +107,13 @@ async fn handle_faketls(
             let mut middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
-            let ad_tag = secret.ad_tag.as_ref().or(config.ad_tag.as_ref());
+            let ctx = MiddleRelayCtx {
+                conn_id: &conn_id, peer, our_addr,
+                proto_tag: parsed.proto.to_raw(),
+                ad_tag: secret.ad_tag.as_ref().or(config.ad_tag.as_ref()),
+            };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_faketls(
-                client, &mut middle, parsed.cipher,
-                &conn_id, peer, our_addr, parsed.proto.to_raw(), ad_tag, extra,
-            ).await;
+            pipe::middle::relay_faketls(client, &mut middle, parsed.cipher, &ctx, extra).await;
         }
     }
 
@@ -156,12 +158,13 @@ async fn handle_classic(
             let mut middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
-            let ad_tag_ref = secret.and_then(|s| s.ad_tag.as_ref()).or(config.ad_tag.as_ref());
+            let ctx = MiddleRelayCtx {
+                conn_id: &conn_id, peer, our_addr,
+                proto_tag: parsed.proto.to_raw(),
+                ad_tag: secret.and_then(|s| s.ad_tag.as_ref()).or(config.ad_tag.as_ref()),
+            };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_classic(
-                client, &mut middle, parsed.cipher,
-                &conn_id, peer, our_addr, parsed.proto.to_raw(), ad_tag_ref,
-            ).await;
+            pipe::middle::relay_classic(client, &mut middle, parsed.cipher, &ctx).await;
         }
     }
 

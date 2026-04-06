@@ -16,15 +16,12 @@ pub struct Config {
     pub healthcheck: HealthcheckConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProxyMode {
+    #[default]
     Direct,
     MiddleProxy,
-}
-
-impl Default for ProxyMode {
-    fn default() -> Self { Self::Direct }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -257,7 +254,7 @@ fn resolve_secrets(file: Option<&ConfigFile>, cli_secrets: &[String]) -> Vec<Sec
 
 
 pub enum Action {
-    Run(Config),
+    Run(Box<Config>),
     Links { secrets: Vec<Secret>, tls_domain: String, port: u16 },
     Check { secrets: Vec<Secret>, tls_domain: String },
     GenerateSecret,
@@ -267,7 +264,7 @@ pub fn parse_args() -> Action {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Run(args) => Action::Run(build_config(args)),
+        Command::Run(args) => Action::Run(Box::new(build_config(args))),
         Command::Links(args) => {
             let file = args.config.as_ref().map(load_config_file);
             let secrets = resolve_secrets(file.as_ref(), &args.secrets);

@@ -17,7 +17,7 @@ use tracing::{info, debug};
 
 pub async fn run() {
     match cli::parse_args() {
-        Action::Run(cfg) => run_server(cfg).await,
+        Action::Run(cfg) => run_server(*cfg).await,
         Action::Links { secrets, tls_domain, port } => print_links(&secrets, &tls_domain, port),
         Action::Check { secrets, tls_domain } => run_check(&secrets, &tls_domain).await,
         Action::GenerateSecret => generate_secret(),

@@ -121,7 +121,7 @@ impl MiddleProxyConn {
             let len_bytes = self.read_cbc(4).await?;
             let msg_len = u32::from_le_bytes(len_bytes[..4].try_into().unwrap()) as usize;
             if msg_len == 4 { continue; }
-            if msg_len < 12 || msg_len > (1 << 24) || msg_len % 4 != 0 {
+            if !(12..=(1 << 24)).contains(&msg_len) || msg_len % 4 != 0 {
                 return Err(format!("bad frame len: {msg_len}").into());
             }
             let rest = self.read_cbc(msg_len - 4).await?;

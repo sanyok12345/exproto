@@ -19,9 +19,11 @@ impl CbcCipher {
     }
 
     pub fn encrypt(&mut self, data: &mut [u8]) {
-        assert!(data.len() % 16 == 0, "ExProto: CBC requires 16-byte aligned data");
+        assert!(data.len() % 16 == 0);
         for chunk in data.chunks_mut(16) {
-            for i in 0..16 { chunk[i] ^= self.enc_iv[i]; }
+            for (c, iv) in chunk.iter_mut().zip(self.enc_iv.iter()) {
+                *c ^= iv;
+            }
             let block = GenericArray::from_mut_slice(chunk);
             self.enc_cipher.encrypt_block(block);
             self.enc_iv.copy_from_slice(chunk);
@@ -29,12 +31,14 @@ impl CbcCipher {
     }
 
     pub fn decrypt(&mut self, data: &mut [u8]) {
-        assert!(data.len() % 16 == 0, "ExProto: CBC requires 16-byte aligned data");
+        assert!(data.len() % 16 == 0);
         for chunk in data.chunks_mut(16) {
             let ct: [u8; 16] = chunk.try_into().unwrap();
             let block = GenericArray::from_mut_slice(chunk);
             self.dec_cipher.decrypt_block(block);
-            for i in 0..16 { chunk[i] ^= self.dec_iv[i]; }
+            for (c, iv) in chunk.iter_mut().zip(self.dec_iv.iter()) {
+                *c ^= iv;
+            }
             self.dec_iv = ct;
         }
     }
