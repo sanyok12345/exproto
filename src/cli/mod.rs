@@ -14,6 +14,41 @@ pub struct Config {
     pub upstream: UpstreamConfig,
     pub max_connections: u64,
     pub healthcheck: HealthcheckConfig,
+    pub tls: TlsConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub handshake: TlsHandshakeConfig,
+    pub stream: TlsStreamConfig,
+    pub fallback: Option<TlsFallbackConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TlsHandshakeConfig {
+    pub fragment: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TlsStreamConfig {
+    pub max_record_size: usize,
+    pub record_jitter: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TlsFallbackConfig {
+    pub hosts: Vec<String>,
+    pub timeout: u64,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            handshake: TlsHandshakeConfig { fragment: true },
+            stream: TlsStreamConfig { max_record_size: 16640, record_jitter: 0.03 },
+            fallback: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -178,7 +213,51 @@ struct SecretEntry {
 }
 
 #[derive(Deserialize, Default)]
-struct TlsCfg { domain: Option<String> }
+struct TlsCfg {
+    domain: Option<String>,
+    #[serde(default)]
+    handshake: TlsHandshakeCfg,
+    #[serde(default)]
+    stream: TlsStreamCfg,
+    #[serde(default)]
+    fallback: Option<TlsFallbackCfg>,
+}
+
+#[derive(Deserialize, Clone)]
+struct TlsHandshakeCfg {
+    #[serde(default = "default_true")]
+    fragment: bool,
+}
+
+impl Default for TlsHandshakeCfg {
+    fn default() -> Self { Self { fragment: true } }
+}
+
+#[derive(Deserialize, Clone)]
+struct TlsStreamCfg {
+    #[serde(default = "default_max_record_size")]
+    max_record_size: usize,
+    #[serde(default = "default_record_jitter")]
+    record_jitter: f64,
+}
+
+impl Default for TlsStreamCfg {
+    fn default() -> Self {
+        Self { max_record_size: 16640, record_jitter: 0.03 }
+    }
+}
+
+fn default_max_record_size() -> usize { 16640 }
+fn default_record_jitter() -> f64 { 0.03 }
+
+#[derive(Deserialize, Clone)]
+struct TlsFallbackCfg {
+    hosts: Vec<String>,
+    #[serde(default = "default_fallback_timeout")]
+    timeout: u64,
+}
+
+fn default_fallback_timeout() -> u64 { 5000 }
 
 #[derive(Deserialize, Default)]
 struct LogCfg { level: Option<String> }
@@ -303,8 +382,23 @@ fn build_config(args: RunArgs) -> Config {
     let tag_hex = file.as_ref().and_then(|f| f.server.proxy_tag.clone()).or(args.proxy_tag);
     let ad_tag = tag_hex.as_deref().and_then(decode_tag);
 
+    let tls_cfg = file.as_ref().map(|f| &f.tls);
+    let tls = TlsConfig {
+        handshake: TlsHandshakeConfig {
+            fragment: tls_cfg.map(|t| t.handshake.fragment).unwrap_or(true),
+        },
+        stream: TlsStreamConfig {
+            max_record_size: tls_cfg.map(|t| t.stream.max_record_size).unwrap_or(16640),
+            record_jitter: tls_cfg.map(|t| t.stream.record_jitter).unwrap_or(0.03),
+        },
+        fallback: tls_cfg.and_then(|t| t.fallback.as_ref()).map(|f| TlsFallbackConfig {
+            hosts: f.hosts.clone(),
+            timeout: f.timeout,
+        }),
+    };
+
     Config {
         secrets, listen_addr, ad_tag, workers, tls_domain, log_level,
-        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck,
+        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck, tls,
     }
 }
