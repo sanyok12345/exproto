@@ -3,7 +3,7 @@ name = "exproto"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "High-performance MTProto proxy with fake-TLS obfuscation"
+description = "Flexible high-performance MTProto proxy for Telegram"
 license = "GPL-3.0-only"
 
 [dependencies]
