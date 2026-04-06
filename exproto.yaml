@@ -1,49 +1,56 @@
-# ExProto configuration
-# Usage: exproto run -c exproto.yaml
-
 server:
-  bind: 0.0.0.0               # listen IP
-  port: 443                    # listen port
-  # max-workers: 4             # 0 or omit = all CPU cores
-  # proxy_tag: "aabb...ff"     # global ad-tag from @MTProxyBot
+  bind: 0.0.0.0
+  port: 443
+  # max-workers: 4
+  # proxy_tag: "aabbccddeeff00112233445566778899"
 
 tls:
-  domain: www.google.com       # default SNI for fake-TLS (ee-secrets)
+  domain: www.google.com
+
+  handshake:
+    fragment: true
+
+  stream:
+    max_record_size: 16640
+    record_jitter: 0.03
+
+  # fallback:
+  #   hosts:
+  #     - "google.com:443"
+  #     - "cloudflare.com:443"
+  #   timeout: 5000
 
 logging:
-  level: info                  # error | warn | info | debug | trace
+  level: info
 
-upstream:                      # default outbound route for all secrets
+upstream:
   type: direct
-  # bind: 10.0.0.1             # outbound IP (omit = any)
+  # bind: 10.0.0.1
 
-# max-connections: 50000       # global limit (0 or omit = unlimited)
+# max-connections: 50000
 
 healthcheck:
   enabled: true
-  interval: 30                 # seconds between DC pings
-  timeout: 5                   # seconds per DC ping
+  interval: 30
+  timeout: 5
 
 secrets:
-  # minimal — inherits all defaults
   - name: free
     secret: "00112233445566778899aabbccddeeff"
 
-  # full — everything overridden
   - name: premium
     secret: "aabbccddeeff00112233445566778899"
-    domain: cdn.jsdelivr.net       # per-secret SNI
-    mode: direct                   # direct | middle-proxy
-    max-connections: 5000          # per-secret limit
-    ad-tag: "fedcba9876543210fedcba9876543210"  # per-secret @MTProxyBot tag
+    domain: cdn.jsdelivr.net
+    mode: direct
+    max-connections: 5000
+    ad-tag: "fedcba9876543210fedcba9876543210"
     upstream:
       type: direct
-      bind: 10.0.0.2              # outbound IP for this secret
+      bind: 10.0.0.2
 
-  # socks5 upstream example
   - name: partner
     secret: "ffeeddccbbaa99887766554433221100"
-    ad-tag: "1234567890abcdef1234567890abcdef"  # partner's own ad-tag
+    ad-tag: "1234567890abcdef1234567890abcdef"
     upstream:
       type: socks5
       address: proxy.partner.com:1080
