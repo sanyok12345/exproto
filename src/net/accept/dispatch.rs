@@ -76,8 +76,19 @@ async fn handle_faketls(
 
     debug!(secret = secret.name, "fake-TLS handshake verified");
 
-    let response = hello::build_server_hello(&secret.key, &hello_result.digest, &hello_result.session_id);
-    client.write_all(&response).await?;
+    let hello = hello::build_server_hello(&secret.key, &hello_result.digest, &hello_result.session_id);
+    if config.tls.handshake.fragment {
+        client.write_all(&hello.handshake).await?;
+        client.flush().await?;
+        client.write_all(&hello.change_cipher).await?;
+        client.flush().await?;
+        client.write_all(&hello.app_data).await?;
+        client.flush().await?;
+    } else {
+        client.write_all(&hello.handshake).await?;
+        client.write_all(&hello.change_cipher).await?;
+        client.write_all(&hello.app_data).await?;
+    }
 
     let init_data = record::read_record(&mut client).await?;
     if init_data.len() < 64 {

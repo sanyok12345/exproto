@@ -11,7 +11,13 @@ const TLS_VERS_12: [u8; 2] = [0x03, 0x03];
 const DIGEST_POS: usize = 11;
 const DIGEST_LEN: usize = 32;
 
-pub fn build_server_hello(secret: &[u8], client_digest: &[u8], session_id: &[u8]) -> Vec<u8> {
+pub struct ServerHelloFragments {
+    pub handshake: Vec<u8>,
+    pub change_cipher: Vec<u8>,
+    pub app_data: Vec<u8>,
+}
+
+pub fn build_server_hello(secret: &[u8], client_digest: &[u8], session_id: &[u8]) -> ServerHelloFragments {
     let mut r = rng();
     let fake_pubkey: [u8; 32] = r.random();
 
@@ -31,31 +37,38 @@ pub fn build_server_hello(secret: &[u8], client_digest: &[u8], session_id: &[u8]
     sh.extend_from_slice(&ext);
 
     let sh_len = sh.len();
-    let mut pkt = Vec::new();
-    pkt.push(TLS_HANDSHAKE);
-    pkt.extend_from_slice(&TLS_VERS_12);
-    pkt.extend_from_slice(&((sh_len + 4) as u16).to_be_bytes());
-    pkt.push(0x02);
-    pkt.push(((sh_len >> 16) & 0xff) as u8);
-    pkt.push(((sh_len >> 8) & 0xff) as u8);
-    pkt.push((sh_len & 0xff) as u8);
-    pkt.extend_from_slice(&sh);
+    let mut handshake = Vec::new();
+    handshake.push(TLS_HANDSHAKE);
+    handshake.extend_from_slice(&TLS_VERS_12);
+    handshake.extend_from_slice(&((sh_len + 4) as u16).to_be_bytes());
+    handshake.push(0x02);
+    handshake.push(((sh_len >> 16) & 0xff) as u8);
+    handshake.push(((sh_len >> 8) & 0xff) as u8);
+    handshake.push((sh_len & 0xff) as u8);
+    handshake.extend_from_slice(&sh);
 
-    pkt.extend_from_slice(&[TLS_CHANGE_CIPHER, 0x03, 0x03, 0x00, 0x01, 0x01]);
+    let change_cipher = vec![TLS_CHANGE_CIPHER, 0x03, 0x03, 0x00, 0x01, 0x01];
 
     let cert_len = r.random_range(1024..4096);
     let mut cert = vec![0u8; cert_len];
     r.fill_bytes(&mut cert[..]);
-    pkt.push(TLS_APP_DATA);
-    pkt.extend_from_slice(&TLS_VERS_12);
-    pkt.extend_from_slice(&(cert_len as u16).to_be_bytes());
-    pkt.extend_from_slice(&cert);
+    let mut app_data = Vec::with_capacity(5 + cert_len);
+    app_data.push(TLS_APP_DATA);
+    app_data.extend_from_slice(&TLS_VERS_12);
+    app_data.extend_from_slice(&(cert_len as u16).to_be_bytes());
+    app_data.extend_from_slice(&cert);
+
+    let mut full = Vec::with_capacity(handshake.len() + change_cipher.len() + app_data.len());
+    full.extend_from_slice(&handshake);
+    full.extend_from_slice(&change_cipher);
+    full.extend_from_slice(&app_data);
 
     let mut mac = HmacSha256::new_from_slice(secret).unwrap();
     mac.update(client_digest);
-    mac.update(&pkt);
+    mac.update(&full);
     let digest = mac.finalize().into_bytes();
-    pkt[DIGEST_POS..DIGEST_POS + DIGEST_LEN].copy_from_slice(&digest);
 
-    pkt
+    handshake[DIGEST_POS..DIGEST_POS + DIGEST_LEN].copy_from_slice(&digest);
+
+    ServerHelloFragments { handshake, change_cipher, app_data }
 }
