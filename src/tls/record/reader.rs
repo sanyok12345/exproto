@@ -1,10 +1,9 @@
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
 
 const TLS_CHANGE_CIPHER: u8 = 0x14;
 const TLS_APP_DATA: u8 = 0x17;
 
-pub async fn read_record(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+pub async fn read_record(stream: &mut (impl AsyncReadExt + Unpin)) -> std::io::Result<Vec<u8>> {
     loop {
         let mut hdr = [0u8; 5];
         stream.read_exact(&mut hdr).await?;
