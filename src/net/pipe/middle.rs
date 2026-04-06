@@ -2,8 +2,10 @@ use crate::crypto::stream::cipher::ObfuscatedCipher;
 use crate::rpc::conn::MiddleProxyConn;
 use crate::tls::record::{read_record, write_record};
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tracing::{debug, trace};
 
 pub struct MiddleRelayCtx<'a> {
@@ -19,6 +21,7 @@ pub async fn relay_classic(
     middle: MiddleProxyConn,
     client_cipher: ObfuscatedCipher,
     ctx: &MiddleRelayCtx<'_>,
+    idle: Duration,
 ) {
     let (mut client_dec, mut client_enc) = client_cipher.into_halves();
     let (mut cr, mut cw) = client.into_split();
@@ -33,7 +36,7 @@ pub async fn relay_classic(
     let c2m = tokio::spawn(async move {
         let mut buf = [0u8; 16384];
         let mut total: u64 = 0;
-        while let Ok(n @ 1..) = cr.read(&mut buf).await {
+        while let Ok(Ok(n @ 1..)) = timeout(idle, cr.read(&mut buf)).await {
             client_dec.apply(&mut buf[..n]);
             if mw.send_proxy_req(&conn_id, peer, our_addr, proto_tag, ad_tag.as_ref(), &buf[..n]).await.is_err() { break; }
             total += n as u64;
@@ -45,15 +48,15 @@ pub async fn relay_classic(
     let m2c = tokio::spawn(async move {
         let mut total: u64 = 0;
         loop {
-            match mr.recv_proxy_ans().await {
-                Ok(Some(mut data)) => {
+            match timeout(idle, mr.recv_proxy_ans()).await {
+                Ok(Ok(Some(mut data))) => {
                     client_enc.apply(&mut data);
                     if cw.write_all(&data).await.is_err() { break; }
                     total += data.len() as u64;
                     trace!(bytes = data.len(), total, "relay: middle -> client");
                 }
-                Ok(None) => {}
-                Err(_) => break,
+                Ok(Ok(None)) => {}
+                _ => break,
             }
         }
         debug!(total_bytes = total, "relay: middle -> client done");
@@ -68,6 +71,7 @@ pub async fn relay_faketls(
     mut client_cipher: ObfuscatedCipher,
     ctx: &MiddleRelayCtx<'_>,
     initial_extra: Option<Vec<u8>>,
+    idle: Duration,
 ) {
     let (mut mr, mut mw) = middle.into_halves();
 
@@ -88,8 +92,8 @@ pub async fn relay_faketls(
     let c2m = tokio::spawn(async move {
         let mut total: u64 = 0;
         loop {
-            match read_record(&mut cr).await {
-                Ok(data) if !data.is_empty() => {
+            match timeout(idle, read_record(&mut cr)).await {
+                Ok(Ok(data)) if !data.is_empty() => {
                     let mut buf = data;
                     client_dec.apply(&mut buf);
                     if mw.send_proxy_req(&conn_id, peer, our_addr, proto_tag, ad_tag.as_ref(), &buf).await.is_err() { break; }
@@ -105,15 +109,15 @@ pub async fn relay_faketls(
     let m2c = tokio::spawn(async move {
         let mut total: u64 = 0;
         loop {
-            match mr.recv_proxy_ans().await {
-                Ok(Some(mut data)) => {
+            match timeout(idle, mr.recv_proxy_ans()).await {
+                Ok(Ok(Some(mut data))) => {
                     client_enc.apply(&mut data);
                     if write_record(&mut cw, &data).await.is_err() { break; }
                     total += data.len() as u64;
                     trace!(bytes = data.len(), total, "relay: middle -> client[tls]");
                 }
-                Ok(None) => {}
-                Err(_) => break,
+                Ok(Ok(None)) => {}
+                _ => break,
             }
         }
         debug!(total_bytes = total, "relay: middle -> client[tls] done");

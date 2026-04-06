@@ -12,8 +12,10 @@ use crate::tls::record;
 use crate::tls::record::writer::RecordWriteConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tracing::{warn, debug, instrument};
 
 const TLS_PREFIX: [u8; 3] = [0x16, 0x03, 0x01];
@@ -34,8 +36,9 @@ fn resolve_bind_addr<'a>(secret: &'a crate::cli::Secret, config: &'a Config) -> 
 pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: Arc<Config>, limiter: Arc<ConnectionLimiter>) {
     let _ = client.set_nodelay(true);
 
+    let hs_timeout = Duration::from_secs(config.timeouts.handshake);
     let mut peek = [0u8; 3];
-    if client.read_exact(&mut peek).await.is_err() {
+    if timeout(hs_timeout, client.read_exact(&mut peek)).await.is_err() || peek == [0; 3] {
         return;
     }
 
@@ -56,7 +59,12 @@ async fn handle_faketls(
     peek: &[u8; 3],
     limiter: &Arc<ConnectionLimiter>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let raw = hello::read_client_hello(&mut client, peek).await?;
+    let hs_timeout = Duration::from_secs(config.timeouts.handshake);
+    let conn_timeout = Duration::from_secs(config.timeouts.connect);
+
+    let raw = timeout(hs_timeout, hello::read_client_hello(&mut client, peek))
+        .await
+        .map_err(|_| "handshake timeout reading ClientHello")??;
 
     let mut hello_result = None;
     let mut matched_secret_idx = 0;
@@ -101,7 +109,9 @@ async fn handle_faketls(
         client.write_all(&hello.app_data).await?;
     }
 
-    let init_data = record::read_record(&mut client).await?;
+    let init_data = timeout(hs_timeout, record::read_record(&mut client))
+        .await
+        .map_err(|_| "handshake timeout reading MTProto init")??;
     if init_data.len() < 64 {
         return Err(format!("init too short ({} bytes)", init_data.len()).into());
     }
@@ -114,15 +124,19 @@ async fn handle_faketls(
 
     debug!(dc = parsed.dc_id, proto = %parsed.proto, secret = secret.name, mode = "fake-tls", "session established");
 
+    let idle = Duration::from_secs(config.timeouts.idle);
+
     match secret.mode {
         ProxyMode::Direct => {
-            let (upstream, dc_cipher) = handshake::connect_to_dc(parsed.dc_id, parsed.proto, bind_addr).await?;
+            let (upstream, dc_cipher) = timeout(conn_timeout, handshake::connect_to_dc(parsed.dc_id, parsed.proto, bind_addr))
+                .await
+                .map_err(|_| "connect timeout to DC")??;
             debug!(dc = parsed.dc_id, "upstream connected (direct)");
             let write_cfg = RecordWriteConfig {
                 max_record_size: config.tls.stream.max_record_size,
                 record_jitter: config.tls.stream.record_jitter,
             };
-            pipe::tls::relay(client, upstream, parsed.cipher, dc_cipher, extra, write_cfg).await;
+            pipe::tls::relay(client, upstream, parsed.cipher, dc_cipher, extra, write_cfg, idle).await;
         }
         ProxyMode::MiddleProxy => {
             let tg_cfg = dc::fetch_telegram_config().await
@@ -130,7 +144,9 @@ async fn handle_faketls(
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();
-            let middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
+            let middle = timeout(conn_timeout, MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret))
+                .await
+                .map_err(|_| "connect timeout to middle-proxy")??;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
             let ctx = MiddleRelayCtx {
@@ -139,7 +155,7 @@ async fn handle_faketls(
                 ad_tag: secret.ad_tag.as_ref().or(config.ad_tag.as_ref()),
             };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_faketls(client, middle, parsed.cipher, &ctx, extra).await;
+            pipe::middle::relay_faketls(client, middle, parsed.cipher, &ctx, extra, idle).await;
         }
     }
 
@@ -154,9 +170,14 @@ async fn handle_classic(
     peek: &[u8; 3],
     limiter: &Arc<ConnectionLimiter>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let hs_timeout = Duration::from_secs(config.timeouts.handshake);
+    let conn_timeout = Duration::from_secs(config.timeouts.connect);
+
     let mut init_buf = [0u8; 64];
     init_buf[..3].copy_from_slice(peek);
-    client.read_exact(&mut init_buf[3..]).await?;
+    timeout(hs_timeout, client.read_exact(&mut init_buf[3..]))
+        .await
+        .map_err(|_| "handshake timeout reading classic init")??;
 
     let parsed = init::parse_init_multi(&init_buf, &config.secrets)?;
 
@@ -169,11 +190,15 @@ async fn handle_classic(
 
     debug!(dc = parsed.dc_id, proto = %parsed.proto, secret = parsed.secret_name, mode = ?mode, "session established");
 
+    let idle = Duration::from_secs(config.timeouts.idle);
+
     match mode {
         ProxyMode::Direct => {
-            let (upstream, dc_cipher) = handshake::connect_to_dc(parsed.dc_id, parsed.proto, bind_addr).await?;
+            let (upstream, dc_cipher) = timeout(conn_timeout, handshake::connect_to_dc(parsed.dc_id, parsed.proto, bind_addr))
+                .await
+                .map_err(|_| "connect timeout to DC")??;
             debug!(dc = parsed.dc_id, "upstream connected (direct)");
-            pipe::classic::relay(client, upstream, parsed.cipher, dc_cipher).await;
+            pipe::classic::relay(client, upstream, parsed.cipher, dc_cipher, idle).await;
         }
         ProxyMode::MiddleProxy => {
             let tg_cfg = dc::fetch_telegram_config().await
@@ -181,7 +206,9 @@ async fn handle_classic(
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();
-            let middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
+            let middle = timeout(conn_timeout, MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret))
+                .await
+                .map_err(|_| "connect timeout to middle-proxy")??;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
             let ctx = MiddleRelayCtx {
@@ -190,7 +217,7 @@ async fn handle_classic(
                 ad_tag: secret.and_then(|s| s.ad_tag.as_ref()).or(config.ad_tag.as_ref()),
             };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_classic(client, middle, parsed.cipher, &ctx).await;
+            pipe::middle::relay_classic(client, middle, parsed.cipher, &ctx, idle).await;
         }
     }
 

@@ -2,8 +2,10 @@ use crate::crypto::stream::cipher::ObfuscatedCipher;
 use crate::tls::record::writer::RecordWriteConfig;
 use crate::tls::record::{read_record, write_record_with};
 use bytes::BytesMut;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tracing::{debug, trace};
 
 const DC_BUF_SIZE: usize = 16384;
@@ -15,6 +17,7 @@ pub async fn relay(
     mut dc_cipher: ObfuscatedCipher,
     initial_extra: Option<Vec<u8>>,
     write_cfg: RecordWriteConfig,
+    idle: Duration,
 ) {
     let (mut cr, mut cw) = client.into_split();
     let (mut ur, mut uw) = upstream.into_split();
@@ -32,8 +35,8 @@ pub async fn relay(
     let c2s = tokio::spawn(async move {
         let mut total: u64 = 0;
         loop {
-            match read_record(&mut cr).await {
-                Ok(data) if !data.is_empty() => {
+            match timeout(idle, read_record(&mut cr)).await {
+                Ok(Ok(data)) if !data.is_empty() => {
                     let mut buf = BytesMut::from(&data[..]);
                     client_dec.apply(&mut buf);
                     dc_enc.apply(&mut buf);
@@ -50,7 +53,7 @@ pub async fn relay(
     let s2c = tokio::spawn(async move {
         let mut buf = [0u8; DC_BUF_SIZE];
         let mut total: u64 = 0;
-        while let Ok(n @ 1..) = ur.read(&mut buf).await {
+        while let Ok(Ok(n @ 1..)) = timeout(idle, ur.read(&mut buf)).await {
             dc_dec.apply(&mut buf[..n]);
             client_enc.apply(&mut buf[..n]);
             if write_record_with(&mut cw, &buf[..n], &write_cfg).await.is_err() { break; }
