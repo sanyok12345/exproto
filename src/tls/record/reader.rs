@@ -1,7 +1,5 @@
+use crate::tls::consts::{TLS_CHANGE_CIPHER, TLS_APP_DATA};
 use tokio::io::AsyncReadExt;
-
-const TLS_CHANGE_CIPHER: u8 = 0x14;
-const TLS_APP_DATA: u8 = 0x17;
 
 pub async fn read_record(stream: &mut (impl AsyncReadExt + Unpin)) -> std::io::Result<Vec<u8>> {
     loop {

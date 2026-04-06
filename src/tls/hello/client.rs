@@ -1,10 +1,9 @@
+use crate::tls::consts::{DIGEST_POS, DIGEST_LEN};
 use crate::tls::verify::hmac::verify_digest;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tracing::trace;
 
-const DIGEST_POS: usize = 11;
-const DIGEST_LEN: usize = 32;
 const SESSION_ID_LEN_POS: usize = 43;
 const SESSION_ID_POS: usize = 44;
 

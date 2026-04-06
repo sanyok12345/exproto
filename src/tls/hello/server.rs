@@ -1,15 +1,9 @@
+use crate::tls::consts::*;
 use hmac::{Hmac, Mac};
 use rand::{Rng, RngCore, rng};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
-
-const TLS_HANDSHAKE: u8 = 0x16;
-const TLS_CHANGE_CIPHER: u8 = 0x14;
-const TLS_APP_DATA: u8 = 0x17;
-const TLS_VERS_12: [u8; 2] = [0x03, 0x03];
-const DIGEST_POS: usize = 11;
-const DIGEST_LEN: usize = 32;
 
 pub struct ServerHelloFragments {
     pub handshake: Vec<u8>,

@@ -1,10 +1,8 @@
+use crate::tls::consts::{DIGEST_LEN, DIGEST_POS};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
-
-const DIGEST_LEN: usize = 32;
-const DIGEST_POS: usize = 11;
 
 pub fn verify_digest(handshake: &[u8], secret: &[u8]) -> Option<u32> {
     if handshake.len() < DIGEST_POS + DIGEST_LEN {
