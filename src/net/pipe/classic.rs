@@ -29,6 +29,7 @@ pub async fn relay(
             total += n as u64;
             trace!(bytes = n, total, "relay: client -> DC");
         }
+        let _ = uw.shutdown().await;
         debug!(total_bytes = total, "relay: client -> DC done");
     });
 
@@ -42,6 +43,7 @@ pub async fn relay(
             total += n as u64;
             trace!(bytes = n, total, "relay: DC -> client");
         }
+        let _ = cw.shutdown().await;
         debug!(total_bytes = total, "relay: DC -> client done");
     });
 

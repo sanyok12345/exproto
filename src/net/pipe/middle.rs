@@ -59,6 +59,7 @@ pub async fn relay_classic(
                 _ => break,
             }
         }
+        let _ = cw.shutdown().await;
         debug!(total_bytes = total, "relay: middle -> client done");
     });
 
@@ -120,6 +121,7 @@ pub async fn relay_faketls(
                 _ => break,
             }
         }
+        let _ = cw.shutdown().await;
         debug!(total_bytes = total, "relay: middle -> client[tls] done");
     });
 
