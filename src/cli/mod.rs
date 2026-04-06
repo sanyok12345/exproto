@@ -15,6 +15,20 @@ pub struct Config {
     pub max_connections: u64,
     pub healthcheck: HealthcheckConfig,
     pub tls: TlsConfig,
+    pub timeouts: TimeoutConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeoutConfig {
+    pub handshake: u64,
+    pub connect: u64,
+    pub idle: u64,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self { handshake: 10, connect: 10, idle: 300 }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -185,7 +199,26 @@ struct ConfigFile {
     max_connections: Option<u64>,
     #[serde(default)]
     healthcheck: Option<HealthcheckConfig>,
+    #[serde(default)]
+    timeouts: TimeoutsCfg,
 }
+
+#[derive(Deserialize, Clone)]
+struct TimeoutsCfg {
+    #[serde(default = "default_10")]
+    handshake: u64,
+    #[serde(default = "default_10")]
+    connect: u64,
+    #[serde(default = "default_300")]
+    idle: u64,
+}
+
+impl Default for TimeoutsCfg {
+    fn default() -> Self { Self { handshake: 10, connect: 10, idle: 300 } }
+}
+
+fn default_10() -> u64 { 10 }
+fn default_300() -> u64 { 300 }
 
 #[derive(Deserialize, Default)]
 struct ServerCfg {
@@ -397,8 +430,15 @@ fn build_config(args: RunArgs) -> Config {
         }),
     };
 
+    let tc = file.as_ref().map(|f| &f.timeouts);
+    let timeouts = TimeoutConfig {
+        handshake: tc.map(|t| t.handshake).unwrap_or(10),
+        connect: tc.map(|t| t.connect).unwrap_or(10),
+        idle: tc.map(|t| t.idle).unwrap_or(300),
+    };
+
     Config {
         secrets, listen_addr, ad_tag, workers, tls_domain, log_level,
-        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck, tls,
+        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck, tls, timeouts,
     }
 }

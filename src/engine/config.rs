@@ -101,5 +101,6 @@ fn load_config(path: &std::path::Path) -> Result<Config, String> {
         max_connections: 0,
         healthcheck: crate::cli::HealthcheckConfig::default(),
         tls: crate::cli::TlsConfig::default(),
+        timeouts: crate::cli::TimeoutConfig::default(),
     })
 }
