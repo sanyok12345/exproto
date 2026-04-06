@@ -5,28 +5,34 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 pub fn spawn_sighup_handler(tx: watch::Sender<Arc<Config>>) {
-    let config_path = std::env::args()
-        .position(|a| a == "-c" || a == "--config")
-        .and_then(|i| std::env::args().nth(i + 1))
-        .map(PathBuf::from);
+    #[cfg(not(unix))]
+    let _ = tx;
 
-    let Some(path) = config_path else { return };
+    #[cfg(unix)]
+    {
+        let config_path = std::env::args()
+            .position(|a| a == "-c" || a == "--config")
+            .and_then(|i| std::env::args().nth(i + 1))
+            .map(PathBuf::from);
 
-    tokio::spawn(async move {
-        let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
-            .expect("exproto: failed to register SIGHUP");
-        loop {
-            sig.recv().await;
-            info!("SIGHUP received, reloading {}", path.display());
-            match load_config(&path) {
-                Ok(cfg) => {
-                    info!(secrets = cfg.secrets.len(), "config reloaded");
-                    let _ = tx.send(Arc::new(cfg));
+        let Some(path) = config_path else { return };
+
+        tokio::spawn(async move {
+            let mut sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+                .expect("exproto: failed to register SIGHUP");
+            loop {
+                sig.recv().await;
+                info!("SIGHUP received, reloading {}", path.display());
+                match load_config(&path) {
+                    Ok(cfg) => {
+                        info!(secrets = cfg.secrets.len(), "config reloaded");
+                        let _ = tx.send(Arc::new(cfg));
+                    }
+                    Err(e) => warn!("reload failed: {e}"),
                 }
-                Err(e) => warn!("reload failed: {e}"),
             }
-        }
-    });
+        });
+    }
 }
 
 fn load_config(path: &std::path::Path) -> Result<Config, String> {
