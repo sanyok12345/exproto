@@ -3,17 +3,18 @@ use crate::tls::record::{read_record, write_record};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tracing::trace;
+use tracing::{debug, trace};
 
 const DC_BUF_SIZE: usize = 16384;
 
 pub async fn relay(
-    client: &mut TcpStream,
+    client: TcpStream,
     upstream: TcpStream,
     mut client_cipher: ObfuscatedCipher,
     mut dc_cipher: ObfuscatedCipher,
     initial_extra: Option<Vec<u8>>,
 ) {
+    let (mut cr, mut cw) = client.into_split();
     let (mut ur, mut uw) = upstream.into_split();
 
     if let Some(mut extra) = initial_extra {
@@ -23,36 +24,39 @@ pub async fn relay(
         trace!(bytes = extra.len(), "relay: forwarded init overflow");
     }
 
-    let mut client_buf = BytesMut::with_capacity(DC_BUF_SIZE);
+    let (mut client_dec, mut client_enc) = client_cipher.into_halves();
+    let (mut dc_dec, mut dc_enc) = dc_cipher.into_halves();
 
-    loop {
-        let mut dc_buf = [0u8; DC_BUF_SIZE];
-
-        tokio::select! {
-            result = read_record(client) => {
-                match result {
-                    Ok(data) if !data.is_empty() => {
-                        client_buf.clear();
-                        client_buf.extend_from_slice(&data);
-                        client_cipher.decrypt_in_place(&mut client_buf);
-                        dc_cipher.encrypt_in_place(&mut client_buf);
-                        if uw.write_all(&client_buf).await.is_err() { break; }
-                        trace!(bytes = client_buf.len(), "relay: client[tls] -> DC");
-                    }
-                    _ => break,
+    let c2s = tokio::spawn(async move {
+        let mut total: u64 = 0;
+        loop {
+            match read_record(&mut cr).await {
+                Ok(data) if !data.is_empty() => {
+                    let mut buf = BytesMut::from(&data[..]);
+                    client_dec.apply(&mut buf);
+                    dc_enc.apply(&mut buf);
+                    if uw.write_all(&buf).await.is_err() { break; }
+                    total += buf.len() as u64;
+                    trace!(bytes = buf.len(), total, "relay: client[tls] -> DC");
                 }
-            }
-            result = ur.read(&mut dc_buf) => {
-                match result {
-                    Ok(n @ 1..) => {
-                        dc_cipher.decrypt_in_place(&mut dc_buf[..n]);
-                        client_cipher.encrypt_in_place(&mut dc_buf[..n]);
-                        if write_record(client, &dc_buf[..n]).await.is_err() { break; }
-                        trace!(bytes = n, "relay: DC -> client[tls]");
-                    }
-                    _ => break,
-                }
+                _ => break,
             }
         }
-    }
+        debug!(total_bytes = total, "relay: client[tls] -> DC done");
+    });
+
+    let s2c = tokio::spawn(async move {
+        let mut buf = [0u8; DC_BUF_SIZE];
+        let mut total: u64 = 0;
+        while let Ok(n @ 1..) = ur.read(&mut buf).await {
+            dc_dec.apply(&mut buf[..n]);
+            client_enc.apply(&mut buf[..n]);
+            if write_record(&mut cw, &buf[..n]).await.is_err() { break; }
+            total += n as u64;
+            trace!(bytes = n, total, "relay: DC -> client[tls]");
+        }
+        debug!(total_bytes = total, "relay: DC -> client[tls] done");
+    });
+
+    let _ = tokio::join!(c2s, s2c);
 }

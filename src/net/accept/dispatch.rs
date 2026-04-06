@@ -39,7 +39,7 @@ pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: 
     }
 
     let result = match detect_mode(&peek) {
-        TransportMode::FakeTls => handle_faketls(&mut client, peer, &config, &peek, &limiter).await,
+        TransportMode::FakeTls => handle_faketls(client, peer, &config, &peek, &limiter).await,
         TransportMode::Classic => handle_classic(client, peer, &config, &peek, &limiter).await,
     };
 
@@ -49,13 +49,13 @@ pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: 
 }
 
 async fn handle_faketls(
-    client: &mut TcpStream,
+    mut client: TcpStream,
     peer: SocketAddr,
     config: &Config,
     peek: &[u8; 3],
     limiter: &Arc<ConnectionLimiter>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let raw = hello::read_client_hello(client, peek).await?;
+    let raw = hello::read_client_hello(&mut client, peek).await?;
 
     let mut hello_result = None;
     let mut matched_secret_idx = 0;
@@ -79,7 +79,7 @@ async fn handle_faketls(
     let response = hello::build_server_hello(&secret.key, &hello_result.digest, &hello_result.session_id);
     client.write_all(&response).await?;
 
-    let init_data = record::read_record(client).await?;
+    let init_data = record::read_record(&mut client).await?;
     if init_data.len() < 64 {
         return Err(format!("init too short ({} bytes)", init_data.len()).into());
     }
@@ -113,7 +113,7 @@ async fn handle_faketls(
                 ad_tag: secret.ad_tag.as_ref().or(config.ad_tag.as_ref()),
             };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_faketls(client, &mut middle, parsed.cipher, &ctx, extra).await;
+            pipe::middle::relay_faketls(&mut client, &mut middle, parsed.cipher, &ctx, extra).await;
         }
     }
 
