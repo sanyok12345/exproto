@@ -69,7 +69,17 @@ async fn handle_faketls(
         }
     }
 
-    let hello_result = hello_result.ok_or("no matching secret for ClientHello")?;
+    let hello_result = match hello_result {
+        Some(r) => r,
+        None => {
+            if let Some(ref fb) = config.tls.fallback {
+                debug!(peer = %peer, "no matching secret, falling back");
+                pipe::fallback::relay_to_fallback(client, &raw.handshake, fb).await;
+                return Ok(());
+            }
+            return Err("no matching secret for ClientHello".into());
+        }
+    };
     let secret = &config.secrets[matched_secret_idx];
 
     let _guard = limiter.try_acquire(&secret.name)
