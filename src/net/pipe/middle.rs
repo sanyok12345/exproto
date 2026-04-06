@@ -4,7 +4,7 @@ use crate::tls::record::{read_record, write_record};
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tracing::trace;
+use tracing::{debug, trace};
 
 pub struct MiddleRelayCtx<'a> {
     pub conn_id: &'a [u8; 8],
@@ -15,77 +15,109 @@ pub struct MiddleRelayCtx<'a> {
 }
 
 pub async fn relay_classic(
-    mut client: TcpStream,
-    middle: &mut MiddleProxyConn,
-    mut client_cipher: ObfuscatedCipher,
+    client: TcpStream,
+    middle: MiddleProxyConn,
+    client_cipher: ObfuscatedCipher,
     ctx: &MiddleRelayCtx<'_>,
 ) {
-    let mut buf = [0u8; 16384];
-    loop {
-        tokio::select! {
-            result = client.read(&mut buf) => {
-                match result {
-                    Ok(n @ 1..) => {
-                        client_cipher.decrypt_in_place(&mut buf[..n]);
-                        if middle.send_proxy_req(ctx.conn_id, ctx.peer, ctx.our_addr, ctx.proto_tag, ctx.ad_tag, &buf[..n]).await.is_err() { break; }
-                        trace!(bytes = n, "relay: client -> middle");
-                    }
-                    _ => break,
+    let (mut client_dec, mut client_enc) = client_cipher.into_halves();
+    let (mut cr, mut cw) = client.into_split();
+    let (mut mr, mut mw) = middle.into_halves();
+
+    let conn_id = *ctx.conn_id;
+    let peer = ctx.peer;
+    let our_addr = ctx.our_addr;
+    let proto_tag = ctx.proto_tag;
+    let ad_tag = ctx.ad_tag.copied();
+
+    let c2m = tokio::spawn(async move {
+        let mut buf = [0u8; 16384];
+        let mut total: u64 = 0;
+        while let Ok(n @ 1..) = cr.read(&mut buf).await {
+            client_dec.apply(&mut buf[..n]);
+            if mw.send_proxy_req(&conn_id, peer, our_addr, proto_tag, ad_tag.as_ref(), &buf[..n]).await.is_err() { break; }
+            total += n as u64;
+            trace!(bytes = n, total, "relay: client -> middle");
+        }
+        debug!(total_bytes = total, "relay: client -> middle done");
+    });
+
+    let m2c = tokio::spawn(async move {
+        let mut total: u64 = 0;
+        loop {
+            match mr.recv_proxy_ans().await {
+                Ok(Some(mut data)) => {
+                    client_enc.apply(&mut data);
+                    if cw.write_all(&data).await.is_err() { break; }
+                    total += data.len() as u64;
+                    trace!(bytes = data.len(), total, "relay: middle -> client");
                 }
-            }
-            result = middle.recv_proxy_ans() => {
-                match result {
-                    Ok(Some(data)) => {
-                        let mut out = data;
-                        client_cipher.encrypt_in_place(&mut out);
-                        if client.write_all(&out).await.is_err() { break; }
-                        trace!(bytes = out.len(), "relay: middle -> client");
-                    }
-                    Ok(None) => {}
-                    Err(_) => break,
-                }
+                Ok(None) => {}
+                Err(_) => break,
             }
         }
-    }
+        debug!(total_bytes = total, "relay: middle -> client done");
+    });
+
+    let _ = tokio::join!(c2m, m2c);
 }
 
 pub async fn relay_faketls(
-    client: &mut TcpStream,
-    middle: &mut MiddleProxyConn,
+    client: TcpStream,
+    middle: MiddleProxyConn,
     mut client_cipher: ObfuscatedCipher,
     ctx: &MiddleRelayCtx<'_>,
     initial_extra: Option<Vec<u8>>,
 ) {
+    let (mut mr, mut mw) = middle.into_halves();
+
     if let Some(mut extra) = initial_extra {
         client_cipher.decrypt_in_place(&mut extra);
-        if middle.send_proxy_req(ctx.conn_id, ctx.peer, ctx.our_addr, ctx.proto_tag, ctx.ad_tag, &extra).await.is_err() { return; }
+        if mw.send_proxy_req(ctx.conn_id, ctx.peer, ctx.our_addr, ctx.proto_tag, ctx.ad_tag, &extra).await.is_err() { return; }
     }
 
-    loop {
-        tokio::select! {
-            result = read_record(client) => {
-                match result {
-                    Ok(data) if !data.is_empty() => {
-                        let mut buf = data;
-                        client_cipher.decrypt_in_place(&mut buf);
-                        if middle.send_proxy_req(ctx.conn_id, ctx.peer, ctx.our_addr, ctx.proto_tag, ctx.ad_tag, &buf).await.is_err() { break; }
-                        trace!(bytes = buf.len(), "relay: client[tls] -> middle");
-                    }
-                    _ => break,
+    let (mut client_dec, mut client_enc) = client_cipher.into_halves();
+    let (mut cr, mut cw) = client.into_split();
+
+    let conn_id = *ctx.conn_id;
+    let peer = ctx.peer;
+    let our_addr = ctx.our_addr;
+    let proto_tag = ctx.proto_tag;
+    let ad_tag = ctx.ad_tag.copied();
+
+    let c2m = tokio::spawn(async move {
+        let mut total: u64 = 0;
+        loop {
+            match read_record(&mut cr).await {
+                Ok(data) if !data.is_empty() => {
+                    let mut buf = data;
+                    client_dec.apply(&mut buf);
+                    if mw.send_proxy_req(&conn_id, peer, our_addr, proto_tag, ad_tag.as_ref(), &buf).await.is_err() { break; }
+                    total += buf.len() as u64;
+                    trace!(bytes = buf.len(), total, "relay: client[tls] -> middle");
                 }
-            }
-            result = middle.recv_proxy_ans() => {
-                match result {
-                    Ok(Some(data)) => {
-                        let mut out = data;
-                        client_cipher.encrypt_in_place(&mut out);
-                        if write_record(client, &out).await.is_err() { break; }
-                        trace!(bytes = out.len(), "relay: middle -> client[tls]");
-                    }
-                    Ok(None) => {}
-                    Err(_) => break,
-                }
+                _ => break,
             }
         }
-    }
+        debug!(total_bytes = total, "relay: client[tls] -> middle done");
+    });
+
+    let m2c = tokio::spawn(async move {
+        let mut total: u64 = 0;
+        loop {
+            match mr.recv_proxy_ans().await {
+                Ok(Some(mut data)) => {
+                    client_enc.apply(&mut data);
+                    if write_record(&mut cw, &data).await.is_err() { break; }
+                    total += data.len() as u64;
+                    trace!(bytes = data.len(), total, "relay: middle -> client[tls]");
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+        debug!(total_bytes = total, "relay: middle -> client[tls] done");
+    });
+
+    let _ = tokio::join!(c2m, m2c);
 }

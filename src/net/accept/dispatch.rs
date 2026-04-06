@@ -130,7 +130,7 @@ async fn handle_faketls(
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();
-            let mut middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
+            let middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
             let ctx = MiddleRelayCtx {
@@ -139,7 +139,7 @@ async fn handle_faketls(
                 ad_tag: secret.ad_tag.as_ref().or(config.ad_tag.as_ref()),
             };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_faketls(&mut client, &mut middle, parsed.cipher, &ctx, extra).await;
+            pipe::middle::relay_faketls(client, middle, parsed.cipher, &ctx, extra).await;
         }
     }
 
@@ -181,7 +181,7 @@ async fn handle_classic(
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();
-            let mut middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
+            let middle = MiddleProxyConn::connect(addrs[idx], &tg_cfg.proxy_secret).await?;
             let conn_id: [u8; 8] = rand::random::<[u8; 16]>()[..8].try_into().unwrap();
             let our_addr = client.local_addr()?;
             let ctx = MiddleRelayCtx {
@@ -190,7 +190,7 @@ async fn handle_classic(
                 ad_tag: secret.and_then(|s| s.ad_tag.as_ref()).or(config.ad_tag.as_ref()),
             };
             debug!(dc = parsed.dc_id, "upstream connected (middle-proxy)");
-            pipe::middle::relay_classic(client, &mut middle, parsed.cipher, &ctx).await;
+            pipe::middle::relay_classic(client, middle, parsed.cipher, &ctx).await;
         }
     }
 
