@@ -30,6 +30,7 @@ thiserror = "2.0.18"
 chrono = "0.4.44"
 arc-swap = "1.7"
 mimalloc = { version = "0.1", default-features = false }
+core_affinity = "0.8"
 
 [[bin]]
 name = "exproto"

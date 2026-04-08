@@ -81,15 +81,22 @@ async fn run_server(cfg: cli::Config) {
 
     info!(workers = worker_count, addr = %listen_addr, "spawning worker pool (SO_REUSEPORT)");
 
+    let core_ids = core_affinity::get_core_ids().unwrap_or_default();
     let mut worker_threads = Vec::with_capacity(worker_count);
     for worker_id in 0..worker_count {
         let cfg_rx = cfg_rx.clone();
         let limiter = limiter.clone();
         let tg_cache = tg_cache.clone();
         let shutdown = shutdown_token.clone();
+        let pin_core = core_ids.get(worker_id % core_ids.len().max(1)).copied();
         let handle = std::thread::Builder::new()
             .name(format!("exproto-worker-{worker_id}"))
             .spawn(move || {
+                if let Some(core) = pin_core {
+                    if core_affinity::set_for_current(core) {
+                        debug!(worker = worker_id, core = core.id, "pinned worker to core");
+                    }
+                }
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
