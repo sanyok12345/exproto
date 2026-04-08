@@ -1,7 +1,6 @@
 use crate::crypto::stream::cipher::ObfuscatedCipher;
 use crate::tls::record::writer::RecordWriteConfig;
-use crate::tls::record::{read_record, write_record_with};
-use bytes::BytesMut;
+use crate::tls::record::{read_record_into, write_record_with};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -34,10 +33,10 @@ pub async fn relay(
 
     let c2s = tokio::spawn(async move {
         let mut total: u64 = 0;
+        let mut buf: Vec<u8> = Vec::with_capacity(16 * 1024);
         loop {
-            match timeout(idle, read_record(&mut cr)).await {
-                Ok(Ok(data)) if !data.is_empty() => {
-                    let mut buf = BytesMut::from(&data[..]);
+            match timeout(idle, read_record_into(&mut cr, &mut buf)).await {
+                Ok(Ok(())) if !buf.is_empty() => {
                     client_dec.apply(&mut buf);
                     dc_enc.apply(&mut buf);
                     if uw.write_all(&buf).await.is_err() { break; }

@@ -1,6 +1,6 @@
 use crate::crypto::stream::cipher::ObfuscatedCipher;
 use crate::rpc::conn::MiddleProxyConn;
-use crate::tls::record::{read_record, write_record};
+use crate::tls::record::{read_record_into, write_record};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -92,10 +92,10 @@ pub async fn relay_faketls(
 
     let c2m = tokio::spawn(async move {
         let mut total: u64 = 0;
+        let mut buf: Vec<u8> = Vec::with_capacity(16 * 1024);
         loop {
-            match timeout(idle, read_record(&mut cr)).await {
-                Ok(Ok(data)) if !data.is_empty() => {
-                    let mut buf = data;
+            match timeout(idle, read_record_into(&mut cr, &mut buf)).await {
+                Ok(Ok(())) if !buf.is_empty() => {
                     client_dec.apply(&mut buf);
                     if mw.send_proxy_req(&conn_id, peer, our_addr, proto_tag, ad_tag.as_ref(), &buf).await.is_err() { break; }
                     total += buf.len() as u64;
