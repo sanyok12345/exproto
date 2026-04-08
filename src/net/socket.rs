@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
-const SOCKET_BUF_SIZE: usize = 256 * 1024;
+const SOCKET_BUF_SIZE: usize = 64 * 1024;
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn configure_socket(stream: &TcpStream) {
