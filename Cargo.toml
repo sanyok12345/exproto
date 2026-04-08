@@ -19,12 +19,12 @@ hmac = "0.13"
 crc32fast = "1.5.0"
 socket2 = { version = "0.6", features = ["all"] }
 tokio-util = "0.7.18"
-reqwest = { version = "0.13", features = ["rustls"], default-features = false }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 clap = { version = "4.6.0", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt", "std"] }
 thiserror = "2.0.18"
 arc-swap = "1.7"
 mimalloc = { version = "0.1", default-features = false }
@@ -35,7 +35,9 @@ name = "exproto"
 path = "src/exproto.rs"
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
-strip = true
+strip = "symbols"
 panic = "abort"
+debug = false
+incremental = false

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::net::SocketAddr;
 use tracing::info;
 
@@ -11,34 +12,32 @@ pub struct TelegramConfig {
 }
 
 pub async fn fetch_telegram_config() -> Result<TelegramConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let (secret_result, config_result) = tokio::join!(
-        fetch_proxy_secret(),
-        fetch_proxy_config()
-    );
-
-    let proxy_secret = secret_result?;
-    let middle_proxies = config_result?;
-
+    let cfg = tokio::task::spawn_blocking(fetch_sync).await??;
     info!(
-        secret_len = proxy_secret.len(),
-        dc_count = middle_proxies.len(),
+        secret_len = cfg.proxy_secret.len(),
+        dc_count = cfg.middle_proxies.len(),
         "fetched telegram config"
     );
-
-    Ok(TelegramConfig { proxy_secret, middle_proxies })
+    Ok(cfg)
 }
 
-async fn fetch_proxy_secret() -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp = reqwest::get(PROXY_SECRET_URL).await?;
-    Ok(resp.bytes().await?.to_vec())
-}
+fn fetch_sync() -> Result<TelegramConfig, Box<dyn std::error::Error + Send + Sync>> {
+    let agent = ureq::Agent::new_with_defaults();
 
-async fn fetch_proxy_config() -> Result<HashMap<i16, Vec<SocketAddr>>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp = reqwest::get(PROXY_CONFIG_URL).await?;
-    let text = resp.text().await?;
+    let mut secret_body = Vec::new();
+    agent.get(PROXY_SECRET_URL)
+        .call()?
+        .body_mut()
+        .as_reader()
+        .read_to_end(&mut secret_body)?;
+
+    let config_text = agent.get(PROXY_CONFIG_URL)
+        .call()?
+        .body_mut()
+        .read_to_string()?;
 
     let mut map: HashMap<i16, Vec<SocketAddr>> = HashMap::new();
-    for line in text.lines() {
+    for line in config_text.lines() {
         let line = line.trim();
         if !line.starts_with("proxy_for") { continue; }
         let parts: Vec<&str> = line.split_whitespace().collect();
@@ -47,7 +46,8 @@ async fn fetch_proxy_config() -> Result<HashMap<i16, Vec<SocketAddr>>, Box<dyn s
         let addr: SocketAddr = match parts[2].trim_end_matches(';').parse() { Ok(v) => v, Err(_) => continue };
         map.entry(dc_idx).or_default().push(addr);
     }
-    Ok(map)
+
+    Ok(TelegramConfig { proxy_secret: secret_body, middle_proxies: map })
 }
 
 pub fn load_proxy_secret_from_file(path: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
