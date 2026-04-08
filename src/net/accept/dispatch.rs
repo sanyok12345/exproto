@@ -112,7 +112,7 @@ async fn handle_faketls(
     };
     let secret = &config.secrets[matched_secret_idx];
 
-    let _guard = limiter.try_acquire(&secret.name)
+    let _guard = limiter.try_acquire(matched_secret_idx)
         .ok_or("connection limit reached")?;
 
     debug!(secret = secret.name, "fake-TLS handshake verified");
@@ -204,10 +204,11 @@ async fn handle_classic(
 
     let parsed = init::parse_init_multi(&init_buf, &config.secrets)?;
 
-    let _guard = limiter.try_acquire(&parsed.secret_name)
+    let secret_idx = config.secrets.iter().position(|s| s.name == parsed.secret_name);
+    let _guard = limiter.try_acquire(secret_idx.unwrap_or(usize::MAX))
         .ok_or("connection limit reached")?;
 
-    let secret = config.secrets.iter().find(|s| s.name == parsed.secret_name);
+    let secret = secret_idx.map(|i| &config.secrets[i]);
     let mode = secret.map(|s| &s.mode).unwrap_or(&ProxyMode::Direct);
     let bind_addr = secret.map(|s| resolve_bind_addr(s, config)).unwrap_or(None);
 

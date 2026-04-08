@@ -54,9 +54,7 @@ async fn run_server(cfg: cli::Config) {
         dc::check_all_dcs(cfg.healthcheck.timeout).await;
     }
 
-    let secret_limits: Vec<(String, u64)> = cfg.secrets.iter()
-        .map(|s| (s.name.clone(), s.max_connections))
-        .collect();
+    let secret_limits: Vec<u64> = cfg.secrets.iter().map(|s| s.max_connections).collect();
     let limiter = Arc::new(ConnectionLimiter::new(cfg.max_connections, secret_limits));
 
     let shutdown_token = CancellationToken::new();
