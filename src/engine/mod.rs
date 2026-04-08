@@ -7,13 +7,14 @@ pub use error::{Error, Result};
 pub use version::{VERSION, CODENAME};
 
 use crate::cli::{self, Action};
-use crate::mtproto::dc;
+use crate::mtproto::dc::{self, TelegramConfigCache};
 use crate::net;
 use crate::net::accept::limit::ConnectionLimiter;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, debug};
+use tracing::{info, debug, error};
 
 pub async fn run() {
     match cli::parse_args() {
@@ -61,10 +62,21 @@ async fn run_server(cfg: cli::Config) {
     let shutdown_token = CancellationToken::new();
     shutdown::spawn_shutdown_handler(shutdown_token.clone());
 
+    let refresh_interval = Duration::from_secs(cfg.telegram.config_refresh_secs);
+    info!(interval_secs = refresh_interval.as_secs(), "bootstrapping Telegram config cache");
+    let tg_cache = match TelegramConfigCache::bootstrap(refresh_interval).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("{e}");
+            return;
+        }
+    };
+    tg_cache.clone().spawn_refresher(shutdown_token.clone()).await;
+
     let (cfg_tx, cfg_rx) = watch::channel(Arc::new(cfg));
     config::spawn_sighup_handler(cfg_tx);
 
-    net::accept::listener::serve(cfg_rx, limiter, shutdown_token).await;
+    net::accept::listener::serve(cfg_rx, limiter, tg_cache, shutdown_token).await;
 
     info!("ExProto stopped");
 }

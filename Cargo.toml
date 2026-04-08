@@ -28,6 +28,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 thiserror = "2.0.18"
 chrono = "0.4.44"
+arc-swap = "1.7"
 
 [[bin]]
 name = "exproto"

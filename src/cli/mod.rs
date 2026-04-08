@@ -16,7 +16,20 @@ pub struct Config {
     pub healthcheck: HealthcheckConfig,
     pub tls: TlsConfig,
     pub timeouts: TimeoutConfig,
+    pub telegram: TelegramConfigCfg,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramConfigCfg {
+    #[serde(default = "default_config_refresh_secs", alias = "config-refresh-secs")]
+    pub config_refresh_secs: u64,
+}
+
+impl Default for TelegramConfigCfg {
+    fn default() -> Self { Self { config_refresh_secs: 3600 } }
+}
+
+fn default_config_refresh_secs() -> u64 { 3600 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TimeoutConfig {
@@ -221,6 +234,8 @@ struct ConfigFile {
     healthcheck: Option<HealthcheckConfig>,
     #[serde(default)]
     timeouts: TimeoutConfig,
+    #[serde(default)]
+    telegram: Option<TelegramConfigCfg>,
 }
 
 #[derive(Deserialize, Default)]
@@ -374,9 +389,10 @@ fn build_config(args: RunArgs) -> Config {
     let tls = file.as_ref().map(|f| f.tls.clone()).unwrap_or_default();
     let tls_domain = tls.domain.clone().unwrap_or(tls_domain);
     let timeouts = file.as_ref().map(|f| f.timeouts.clone()).unwrap_or_default();
+    let telegram = file.as_ref().and_then(|f| f.telegram.clone()).unwrap_or_default();
 
     Config {
         secrets, listen_addr, ad_tag, workers, tls_domain, log_level,
-        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck, tls, timeouts,
+        aes_pwd: args.aes_pwd, upstream, max_connections, healthcheck, tls, timeouts, telegram,
     }
 }

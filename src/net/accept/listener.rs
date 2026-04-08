@@ -1,6 +1,7 @@
 use super::dispatch;
 use super::limit::ConnectionLimiter;
 use crate::cli::Config;
+use crate::mtproto::dc::TelegramConfigCache;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -10,6 +11,7 @@ use tracing::{error, info};
 pub async fn serve(
     cfg_rx: watch::Receiver<Arc<Config>>,
     limiter: Arc<ConnectionLimiter>,
+    tg_cache: Arc<TelegramConfigCache>,
     shutdown: CancellationToken,
 ) {
     let addr = cfg_rx.borrow().listen_addr;
@@ -28,7 +30,8 @@ pub async fn serve(
                 };
                 let cfg = cfg_rx.borrow().clone();
                 let lim = limiter.clone();
-                tokio::spawn(dispatch::handle_connection(stream, peer, cfg, lim));
+                let tg = tg_cache.clone();
+                tokio::spawn(dispatch::handle_connection(stream, peer, cfg, lim, tg));
             }
             _ = shutdown.cancelled() => {
                 info!(

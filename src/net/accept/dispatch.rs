@@ -3,7 +3,7 @@ use crate::engine::error::ProtocolError;
 use crate::mtproto::conn::state::TransportMode;
 use crate::mtproto::handshake;
 use crate::mtproto::init;
-use crate::mtproto::dc;
+use crate::mtproto::dc::TelegramConfigCache;
 use crate::net::accept::limit::ConnectionLimiter;
 use crate::net::pipe;
 use crate::net::pipe::middle::MiddleRelayCtx;
@@ -44,7 +44,13 @@ fn resolve_bind_addr<'a>(secret: &'a crate::cli::Secret, config: &'a Config) -> 
 }
 
 #[instrument(skip_all, fields(peer = %peer))]
-pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: Arc<Config>, limiter: Arc<ConnectionLimiter>) {
+pub async fn handle_connection(
+    mut client: TcpStream,
+    peer: SocketAddr,
+    config: Arc<Config>,
+    limiter: Arc<ConnectionLimiter>,
+    tg_cache: Arc<TelegramConfigCache>,
+) {
     configure_socket(&client);
 
     let hs_timeout = Duration::from_secs(config.timeouts.handshake);
@@ -54,8 +60,8 @@ pub async fn handle_connection(mut client: TcpStream, peer: SocketAddr, config: 
     }
 
     let result = match detect_mode(&peek) {
-        TransportMode::FakeTls => handle_faketls(client, peer, &config, &peek, &limiter).await,
-        TransportMode::Classic => handle_classic(client, peer, &config, &peek, &limiter).await,
+        TransportMode::FakeTls => handle_faketls(client, peer, &config, &peek, &limiter, &tg_cache).await,
+        TransportMode::Classic => handle_classic(client, peer, &config, &peek, &limiter, &tg_cache).await,
     };
 
     if let Err(e) = result {
@@ -73,6 +79,7 @@ async fn handle_faketls(
     config: &Config,
     peek: &[u8; 3],
     limiter: &Arc<ConnectionLimiter>,
+    tg_cache: &Arc<TelegramConfigCache>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let hs_timeout = Duration::from_secs(config.timeouts.handshake);
     let conn_timeout = Duration::from_secs(config.timeouts.connect);
@@ -155,8 +162,7 @@ async fn handle_faketls(
             pipe::tls::relay(client, upstream, parsed.cipher, dc_cipher, extra, write_cfg, idle).await;
         }
         ProxyMode::MiddleProxy => {
-            let tg_cfg = dc::fetch_telegram_config().await
-                .map_err(|e| format!("fetch telegram config: {e}"))?;
+            let tg_cfg = tg_cache.get();
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();
@@ -185,6 +191,7 @@ async fn handle_classic(
     config: &Config,
     peek: &[u8; 3],
     limiter: &Arc<ConnectionLimiter>,
+    tg_cache: &Arc<TelegramConfigCache>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let hs_timeout = Duration::from_secs(config.timeouts.handshake);
     let conn_timeout = Duration::from_secs(config.timeouts.connect);
@@ -217,8 +224,7 @@ async fn handle_classic(
             pipe::classic::relay(client, upstream, parsed.cipher, dc_cipher, idle).await;
         }
         ProxyMode::MiddleProxy => {
-            let tg_cfg = dc::fetch_telegram_config().await
-                .map_err(|e| format!("fetch telegram config: {e}"))?;
+            let tg_cfg = tg_cache.get();
             let addrs = tg_cfg.middle_proxies.get(&parsed.dc_id)
                 .ok_or_else(|| format!("no middle-proxy for dc {}", parsed.dc_id))?;
             let idx = rand::random::<u32>() as usize % addrs.len();

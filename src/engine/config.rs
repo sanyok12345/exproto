@@ -102,5 +102,6 @@ fn load_config(path: &std::path::Path) -> Result<Config, String> {
         healthcheck: crate::cli::HealthcheckConfig::default(),
         tls: crate::cli::TlsConfig::default(),
         timeouts: crate::cli::TimeoutConfig::default(),
+        telegram: crate::cli::TelegramConfigCfg::default(),
     })
 }
