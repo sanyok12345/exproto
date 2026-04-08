@@ -73,10 +73,47 @@ async fn run_server(cfg: cli::Config) {
     };
     tg_cache.clone().spawn_refresher(shutdown_token.clone()).await;
 
+    let worker_count = resolve_worker_count(cfg.workers);
+    let listen_addr = cfg.listen_addr;
+
     let (cfg_tx, cfg_rx) = watch::channel(Arc::new(cfg));
     config::spawn_sighup_handler(cfg_tx);
 
-    net::accept::listener::serve(cfg_rx, limiter, tg_cache, shutdown_token).await;
+    info!(workers = worker_count, addr = %listen_addr, "spawning worker pool (SO_REUSEPORT)");
+
+    let mut worker_threads = Vec::with_capacity(worker_count);
+    for worker_id in 0..worker_count {
+        let cfg_rx = cfg_rx.clone();
+        let limiter = limiter.clone();
+        let tg_cache = tg_cache.clone();
+        let shutdown = shutdown_token.clone();
+        let handle = std::thread::Builder::new()
+            .name(format!("exproto-worker-{worker_id}"))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build worker runtime");
+                rt.block_on(async move {
+                    let listener = match crate::net::socket::build_reuseport_listener(listen_addr) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            error!(worker = worker_id, "failed to bind {listen_addr}: {e}");
+                            return;
+                        }
+                    };
+                    net::accept::listener::serve_on(listener, worker_id, cfg_rx, limiter, tg_cache, shutdown).await;
+                });
+            })
+            .expect("spawn worker thread");
+        worker_threads.push(handle);
+    }
+
+    shutdown_token.cancelled().await;
+    info!("master: shutdown signaled, joining workers");
+    for h in worker_threads {
+        let _ = h.join();
+    }
 
     info!("ExProto stopped");
 }
@@ -113,6 +150,13 @@ async fn run_check(secrets: &[cli::Secret], tls_domain: &str) {
     let alive = results.iter().filter(|r| r.alive).count();
     println!();
     println!("{}/{} DCs reachable", alive, results.len());
+}
+
+fn resolve_worker_count(configured: usize) -> usize {
+    if configured > 0 {
+        return configured;
+    }
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }
 
 fn generate_secret() {

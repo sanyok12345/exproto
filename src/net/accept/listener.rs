@@ -2,11 +2,24 @@ use super::dispatch;
 use super::limit::ConnectionLimiter;
 use crate::cli::Config;
 use crate::mtproto::dc::TelegramConfigCache;
+use crate::net::socket::build_reuseport_listener;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
+
+pub async fn serve_on(
+    listener: TcpListener,
+    worker_id: usize,
+    cfg_rx: watch::Receiver<Arc<Config>>,
+    limiter: Arc<ConnectionLimiter>,
+    tg_cache: Arc<TelegramConfigCache>,
+    shutdown: CancellationToken,
+) {
+    info!(worker = worker_id, "worker accepting connections");
+    run_accept_loop(listener, cfg_rx, limiter, tg_cache, shutdown, Some(worker_id)).await;
+}
 
 pub async fn serve(
     cfg_rx: watch::Receiver<Arc<Config>>,
@@ -15,12 +28,21 @@ pub async fn serve(
     shutdown: CancellationToken,
 ) {
     let addr = cfg_rx.borrow().listen_addr;
-    let listener = TcpListener::bind(addr)
-        .await
+    let listener = build_reuseport_listener(addr)
         .unwrap_or_else(|e| panic!("exproto: failed to bind {addr}: {e}"));
 
     info!(addr = %addr, "accepting connections");
+    run_accept_loop(listener, cfg_rx, limiter, tg_cache, shutdown, None).await;
+}
 
+async fn run_accept_loop(
+    listener: TcpListener,
+    cfg_rx: watch::Receiver<Arc<Config>>,
+    limiter: Arc<ConnectionLimiter>,
+    tg_cache: Arc<TelegramConfigCache>,
+    shutdown: CancellationToken,
+    worker_id: Option<usize>,
+) {
     loop {
         tokio::select! {
             result = listener.accept() => {
@@ -35,6 +57,7 @@ pub async fn serve(
             }
             _ = shutdown.cancelled() => {
                 info!(
+                    worker = ?worker_id,
                     active = limiter.active_connections(),
                     "shutdown: stopped accepting, waiting for active connections to drain"
                 );
