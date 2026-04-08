@@ -1,5 +1,5 @@
 use crate::tls::consts::{DIGEST_LEN, DIGEST_POS};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, KeyInit};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;

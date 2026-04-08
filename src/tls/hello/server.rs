@@ -1,5 +1,5 @@
 use crate::tls::consts::*;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, KeyInit};
 use rand::{Rng, RngCore, rng};
 use sha2::Sha256;
 
