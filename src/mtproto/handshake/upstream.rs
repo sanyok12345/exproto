@@ -6,7 +6,7 @@ use crate::mtproto::dc;
 use crate::net::socket::configure_socket;
 use super::pattern;
 use ctr::cipher::{KeyIvInit, StreamCipher};
-use rand::RngCore as _;
+use rand::Rng as _;
 use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;

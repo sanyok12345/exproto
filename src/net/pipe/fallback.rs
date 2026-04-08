@@ -1,6 +1,6 @@
 use crate::cli::TlsFallbackConfig;
 use crate::net::socket::configure_socket;
-use rand::Rng;
+use rand::RngExt;
 use std::time::Duration;
 use tokio::io::{AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;

@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use std::io::IoSlice;
 use tokio::io::AsyncWriteExt;
 
