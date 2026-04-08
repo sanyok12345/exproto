@@ -1,4 +1,5 @@
 use rand::Rng;
+use std::io::IoSlice;
 use tokio::io::AsyncWriteExt;
 
 const DEFAULT_MAX_PAYLOAD: usize = 16640;
@@ -38,13 +39,46 @@ pub async fn write_record_with(
     while offset < data.len() {
         let chunk_size = cfg.effective_max().min(data.len() - offset);
         let chunk = &data[offset..offset + chunk_size];
-        let len = chunk.len() as u16;
-        let mut buf = Vec::with_capacity(5 + chunk.len());
-        buf.extend_from_slice(&TLS_HEADER);
-        buf.extend_from_slice(&len.to_be_bytes());
-        buf.extend_from_slice(chunk);
-        stream.write_all(&buf).await?;
+        let len = (chunk.len() as u16).to_be_bytes();
+        let header = [TLS_HEADER[0], TLS_HEADER[1], TLS_HEADER[2], len[0], len[1]];
+        write_all_vectored(stream, &header, chunk).await?;
         offset += chunk_size;
     }
     Ok(())
+}
+
+async fn write_all_vectored(
+    stream: &mut (impl AsyncWriteExt + Unpin),
+    header: &[u8],
+    body: &[u8],
+) -> std::io::Result<()> {
+    let mut h_off = 0usize;
+    let mut b_off = 0usize;
+    loop {
+        let slices = [
+            IoSlice::new(&header[h_off..]),
+            IoSlice::new(&body[b_off..]),
+        ];
+        let n = stream.write_vectored(&slices).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "write_vectored returned 0",
+            ));
+        }
+        let h_rem = header.len() - h_off;
+        if n >= h_rem {
+            b_off += n - h_rem;
+            h_off = header.len();
+        } else {
+            h_off += n;
+        }
+        if h_off == header.len() && b_off == body.len() {
+            return Ok(());
+        }
+        if h_off == header.len() {
+            stream.write_all(&body[b_off..]).await?;
+            return Ok(());
+        }
+    }
 }
