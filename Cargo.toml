@@ -17,7 +17,7 @@ hex = "0.4.3"
 rand = "0.10"
 hmac = "0.13"
 crc32fast = "1.5.0"
-socket2 = { version = "0.5.10", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 tokio-util = "0.7.18"
 reqwest = { version = "0.13", features = ["rustls", "webpki-roots"], default-features = false }
 clap = { version = "4.6.0", features = ["derive"] }
