@@ -1,52 +1,52 @@
-# What is ExProto?
+# ExProto
 
-ExProto is a fast and flexible MTProto proxy server for everyone, written in
-Rust. It works as a transparent relay between Telegram clients and Telegram
-datacenters, wrapping MTProto traffic in fake TLS to get past DPI and
-censorship systems.
+MTProto proxy for Telegram. Single binary, zero config, runs anywhere.
 
-This README is just a fast *quick start* document. See `exproto.yaml` for
-the full configuration reference.
+Wraps MTProto traffic in fake TLS to bypass DPI and censorship. Download,
+run, share the link.
 
-# Building
+## Quick Start
 
-ExProto requires Rust 1.75+ and Cargo. It is as simple as:
+```bash
+# 1. Download (linux amd64, see Releases for other platforms)
+curl -Lo exproto https://github.com/sanyok12345/exproto/releases/latest/download/exproto-linux-amd64
+chmod +x exproto
 
-    cargo build --release
+# 2. Run
+./exproto run -H 443
 
-The binary will be at `target/release/exproto`.
+# That's it. ExProto generates a secret, binds port 443, and prints
+# a ready-to-share tg://proxy link to stdout.
+```
 
-To cross-compile for Linux or ARM:
+No config files. No Docker. No dependencies. One binary does everything.
 
-    cargo build --release --target x86_64-unknown-linux-gnu
-    cargo build --release --target aarch64-unknown-linux-gnu
+## Options
 
-# Running
+Override anything from the command line:
 
-To generate a new secret:
+```bash
+# Custom secret + port
+./exproto run -S 9a17d3fddaf04683933007b5c155ed4a -H 8443
 
-    exproto secret
+# Multiple secrets
+./exproto run -S <secret1> -S <secret2> -H 443
 
-To run with a secret on port 443:
+# Custom TLS domain for SNI camouflage
+./exproto run -S <secret> -H 443 --tls-domain ya.ru
+```
 
-    exproto run -S <hex-secret> -H 443
+Generate and manage secrets:
 
-To run with a configuration file:
+```bash
+./exproto secret          # generate a new random secret
+./exproto links -S <hex>  # print tg:// sharing links
+./exproto check -c cfg.yaml  # validate config without starting
+```
 
-    exproto run -c exproto.yaml
+## Configuration File
 
-To generate `tg://proxy` links for sharing:
-
-    exproto links -c exproto.yaml
-
-To validate a configuration file without starting:
-
-    exproto check -c exproto.yaml
-
-# Configuration
-
-ExProto uses YAML configuration. All sections are optional with sensible
-defaults.
+For advanced setups, use YAML. All fields are optional with sensible defaults.
 
 ```yaml
 server:
@@ -55,25 +55,22 @@ server:
 
 tls:
   domain: www.google.com
-
   handshake:
     fragment: true
-
-  stream:
-    max_record_size: 16640
-    record_jitter: 0.03
-
   fallback:
     hosts:
       - "google.com:443"
-      - "cloudflare.com:443"
     timeout: 5000
 
 secrets:
   - name: main
-    secret: "00112233445566778899aabbccddeeff"
+    secret: "9a17d3fddaf04683933007b5c155ed4a"
 ```
 
-See `exproto.yaml` for the full reference with all available options including
-per-secret upstream routing, connection limits, SOCKS5 support, healthchecks,
-and ad-tags.
+```bash
+./exproto run -c exproto.yaml
+```
+
+See `exproto.yaml` for the full reference including per-secret upstream
+routing, connection limits, SOCKS5, worker pools, healthchecks, and ad-tags.
+
